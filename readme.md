@@ -32,7 +32,6 @@ This is a working demo using [Streamlit](https://streamlit.io/) and [LlamaIndex]
    pip install -r requirements.txt
    ```
 5. Create a `.env` file in the root directory
-   ```
 
 ## How to Run
 1. Start the Streamlit app:

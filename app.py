@@ -3,7 +3,6 @@ import streamlit as st
 from dotenv import load_dotenv
 from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage, Settings
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.llms.openai import OpenAI
 from llama_index.readers.imap import ImapReader
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.openai_like import OpenAILikeEmbedding
@@ -46,9 +45,7 @@ embeddings = OpenAILikeEmbedding(
     model_name=OPENAI_EMBEDDING_MODEL,
     api_key=REGOLO_AI_API_KEY,
     api_base=OPENAI_HOST,
-    model_type="embedding"
 )
-
 Settings.llm = llm
 Settings.embed_model = embeddings
 
@@ -67,6 +64,12 @@ if st.button("Index Emails"):
 
         node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=20)
         nodes = node_parser.get_nodes_from_documents(emails)
+        for node in nodes:
+            try:
+                embedding = embeddings._get_text_embedding(node.get_text())
+                setattr(node, "embedding", embedding)
+            except Exception as e:
+                st.error(f"Error on embedding: {e}")
 
         index = VectorStoreIndex.from_documents(
             nodes,
@@ -109,7 +112,7 @@ with st.form("query_form"):
             st.warning("No index found. Please index your emails first.")
         else:
             try:
-                response = index.as_query_engine(llm=llm,similarity_top_k=3).query(query)
+                response = index.as_query_engine(similarity_top_k=3).query(query)
                 st.write("### Query Response")
                 st.write(response)
             except Exception as e:
