@@ -8,6 +8,7 @@ from llama_index.core.schema import TextNode
 from llama_index.readers.imap import ImapReader
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.openai_like import OpenAILikeEmbedding
+from llama_index.core.vector_stores import VectorStoreQuery
 import traceback
 import json
 
@@ -29,18 +30,21 @@ st.title("LlamaIndex Email RAG with Configurable OpenAI Model")
 if not REGOLO_AI_API_KEY or not USER_EMAIL or not USER_PASSWORD:
     st.error("Missing environment variables. Please update your `.env` file with all required fields.")
 
-st.sidebar.write(f"Using Model: {OPENAI_MODEL}")
-st.sidebar.write(f"Using Embedding Model: {OPENAI_EMBEDDING_MODEL}")
-st.sidebar.write(f"Using OpenAI Provider: {OPENAI_HOST}")
-st.sidebar.write(f"Connecting to: {USER_EMAIL}")
+st.sidebar.markdown(f"""
+**Model:** {OPENAI_MODEL}
 
-index_file_path = os.path.join(INDEX_STORAGE_DIR, "docstore.json")
+**Embedding Model:** {OPENAI_EMBEDDING_MODEL}
+
+**OpenAI Provider:** {OPENAI_HOST}
+
+**User Email:** {USER_EMAIL}
+""")
 
 llm = OpenAILike(
     model=OPENAI_MODEL,
     api_key=REGOLO_AI_API_KEY,
     api_base=OPENAI_HOST,
-    is_chat_model=True,
+    is_chat_model=False,
     is_function_calling_model=False,
     context_window=8192,
 )
@@ -63,29 +67,34 @@ def fetch_emails_with_imap():
 def save_vector_store(file_path, nodes):
     with open(file_path, "w") as f:
         json.dump(
-            [{"text": node['text'], "embedding": node['embedding']} for node in nodes],
+            [{"text": node['text'], "embedding": node['embedding'], "id": node['id']} for node in nodes],
             f,
         )
     st.success(f"Vector store saved to {file_path}")
 
 def load_vector_store(file_path):
+    vector_store = SimpleVectorStore()
+    id_to_text = {}
+
     if os.path.exists(file_path):
         with open(file_path, "r") as f:
             data = json.load(f)
-            nodes = []
-            vector_store = SimpleVectorStore()
-            for item in data:
-                node = TextNode(text=item["text"])
-                node.embedding = item["embedding"]
-                nodes.append(node)
 
-            vector_store.add(nodes=nodes)
-            st.success(f"Vector store loaded from {file_path}")
-            return vector_store
-    else:
-        return SimpleVectorStore()
+        nodes = []
+        for item in data:
+            node = TextNode(
+                text=item["text"],
+                id_=item["id"]
+            )
+            node.embedding = item["embedding"]
+            nodes.append(node)
+            id_to_text[item["id"]] = item["text"]
 
-index = load_vector_store(INDEX_FILE)
+        vector_store.add(nodes)
+
+    st.sidebar.write(f"Email indexed: {len(data)}")
+
+    return vector_store, id_to_text
 
 if st.button("Index Emails"):
     try:
@@ -98,11 +107,12 @@ if st.button("Index Emails"):
         to_save = []
         for node in nodes:
             text = node.get_text()
+            embedding = embeddings._get_text_embedding(text)
             text_node = TextNode(text=text)
-            to_save.append({"text": text, "embedding": embeddings._get_text_embedding(text)})
-            text_node.embedding = embeddings._get_text_embedding(text)
+            to_save.append({"text": text, "embedding": embedding, "id": node.node_id})
+            text_node.embedding = embedding
             indexed_nodes.append(text_node)
-
+        index = SimpleVectorStore()
         index.add(nodes=indexed_nodes)
 
         os.makedirs(INDEX_STORAGE_DIR, exist_ok=True)
@@ -111,21 +121,48 @@ if st.button("Index Emails"):
         st.error(f"Error occurred while indexing emails: {e}")
         st.error(traceback.format_exc())
 
-index = load_vector_store(INDEX_FILE)
-# st.sidebar.write(f"Emails avalaible: {len(index._data['docs'])}")
+index, id_to_text = load_vector_store(INDEX_FILE)
 
 with st.form("query_form"):
     query = st.text_input("Search your emails or ask a question")
     submit_query = st.form_submit_button("Run Query")
 
     if submit_query:
-        if not index_file_path:
+        if not os.path.exists(INDEX_FILE):
             st.warning("No index found. Please index your emails first.")
         else:
             try:
                 query_embedding = embeddings._get_text_embedding(query)
-                response = index.query(query_embedding, similarity_top_k=3)
+                vs_query = VectorStoreQuery(
+                    query_embedding=query_embedding,
+                    similarity_top_k=3,
+                )
+                response = index.query(vs_query, similarity_top_k=3)
+                texts = [id_to_text[_id] for _id in response.ids]
+                context = "\n\n".join(
+                    f"[Email {i+1}]\n{text}"
+                    for i, text in enumerate(texts)
+                )
+                st.write(f"### Email found: {len(texts)}")
+
+                prompt = f"""
+                You are an assistant who responds using EXCLUSIVELY the provided emails.
+
+                EMAIL:
+                {context}
+
+                QUESTION:
+                {query}
+
+                INSTRUCTIONS:
+
+                Use only the information contained in the emails
+                If the emails do not contain the answer, state it clearly
+                Respond in a detailed and structured manner
+                """
+                response = llm.complete(prompt)
                 st.write("### Query Response")
-                st.write(response)
+                st.write(response.text)
             except Exception as e:
                 st.error(f"An error occurred while querying: {e}")
+                st.error(traceback.format_exc())

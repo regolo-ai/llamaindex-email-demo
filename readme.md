@@ -1,6 +1,6 @@
 # LlamaIndex Email RAG Demo
 
-This is a working demo using [Streamlit](https://streamlit.io/) and [LlamaIndex](https://www.llamaindex.ai/) to build a simple email-based Retrieval-Augmented Generation (RAG) system.
+This is a working demo using [Streamlit](https://streamlit.io/) and [LlamaIndex](https://www.llamaindex.ai/) to build a simple email-based Retrieval-Augmented Generation (RAG) system with an Open-AI compatible provider like Regolo.AI.
 
 ## Features
 - Index and query data directly from your email inbox.
@@ -9,7 +9,7 @@ This is a working demo using [Streamlit](https://streamlit.io/) and [LlamaIndex]
 
 ## Prerequisites
 - Python 3.8 or above
-- An OpenAI-compatible API key
+- An OpenAI-compatible API key, like Regolo.AI
 - An IMAP-compatible email account
 
 ## Setup
@@ -44,7 +44,3 @@ This is a working demo using [Streamlit](https://streamlit.io/) and [LlamaIndex]
    - Enter a query to search your indexed emails or ask a question.
 
 3. The app will use your configured OpenAI-compatible model to perform RAG.
-
-## Notes
-- Only a limited number of emails are fetched and indexed (default is 50).
-- The app stores the index in the `index_storage` directory for faster future queries.
