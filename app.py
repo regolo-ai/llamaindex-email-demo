@@ -1,8 +1,10 @@
 import os
 import streamlit as st
 from dotenv import load_dotenv
-from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage, Settings
+from llama_index.core import StorageContext, load_index_from_storage, Settings
+from llama_index.core.vector_stores.simple import SimpleVectorStore
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.schema import TextNode
 from llama_index.readers.imap import ImapReader
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.openai_like import OpenAILikeEmbedding
@@ -20,6 +22,7 @@ USER_EMAIL = os.getenv("USER_EMAIL")
 USER_PASSWORD = os.getenv("USER_PASSWORD")
 IMAP_SERVER = os.getenv("IMAP_SERVER", "imap.gmail.com")
 INDEX_STORAGE_DIR = "index_storage"
+INDEX_FILE = os.path.join(INDEX_STORAGE_DIR, "vector_store.json")
 
 st.title("LlamaIndex Email RAG with Configurable OpenAI Model")
 
@@ -57,6 +60,33 @@ def fetch_emails_with_imap():
     )
     return list(reader.load_data(search_criteria="ALL"))
 
+def save_vector_store(file_path, nodes):
+    with open(file_path, "w") as f:
+        json.dump(
+            [{"text": node['text'], "embedding": node['embedding']} for node in nodes],
+            f,
+        )
+    st.success(f"Vector store saved to {file_path}")
+
+def load_vector_store(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            data = json.load(f)
+            nodes = []
+            vector_store = SimpleVectorStore()
+            for item in data:
+                node = TextNode(text=item["text"])
+                node.embedding = item["embedding"]
+                nodes.append(node)
+
+            vector_store.add(nodes=nodes)
+            st.success(f"Vector store loaded from {file_path}")
+            return vector_store
+    else:
+        return SimpleVectorStore()
+
+index = load_vector_store(INDEX_FILE)
+
 if st.button("Index Emails"):
     try:
         emails = fetch_emails_with_imap()
@@ -64,44 +94,25 @@ if st.button("Index Emails"):
 
         node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=20)
         nodes = node_parser.get_nodes_from_documents(emails)
+        indexed_nodes = []
+        to_save = []
         for node in nodes:
-            try:
-                embedding = embeddings._get_text_embedding(node.get_text())
-                setattr(node, "embedding", embedding)
-            except Exception as e:
-                st.error(f"Error on embedding: {e}")
+            text = node.get_text()
+            text_node = TextNode(text=text)
+            to_save.append({"text": text, "embedding": embeddings._get_text_embedding(text)})
+            text_node.embedding = embeddings._get_text_embedding(text)
+            indexed_nodes.append(text_node)
 
-        index = VectorStoreIndex.from_documents(
-            nodes,
-            node_parser=node_parser
-        )
-        index.storage_context.persist(persist_dir=INDEX_STORAGE_DIR)
-        st.sidebar.write(f"Emails avalaible: {len(index.docstore.docs)}")
+        index.add(nodes=indexed_nodes)
+
+        os.makedirs(INDEX_STORAGE_DIR, exist_ok=True)
+        save_vector_store(INDEX_FILE, to_save)
     except Exception as e:
         st.error(f"Error occurred while indexing emails: {e}")
         st.error(traceback.format_exc())
 
-if os.path.exists(index_file_path):
-    storage_context = StorageContext.from_defaults(persist_dir=INDEX_STORAGE_DIR)
-    docstore = storage_context.docstore
-
-    try:
-        all_document_ids = docstore.get_document_ids()
-        nodes = [docstore.get_document(doc_id) for doc_id in all_document_ids]
-    except AttributeError:
-        nodes = []
-
-    index = VectorStoreIndex.from_documents(
-        nodes,
-        storage_context=storage_context,
-    )
-else:
-    index = VectorStoreIndex.from_documents(
-            [],
-        )
-    index.storage_context.persist(persist_dir=INDEX_STORAGE_DIR)
-
-st.sidebar.write(f"Emails avalaible: {len(index.docstore.docs)}")
+index = load_vector_store(INDEX_FILE)
+# st.sidebar.write(f"Emails avalaible: {len(index._data['docs'])}")
 
 with st.form("query_form"):
     query = st.text_input("Search your emails or ask a question")
@@ -112,7 +123,8 @@ with st.form("query_form"):
             st.warning("No index found. Please index your emails first.")
         else:
             try:
-                response = index.as_query_engine(similarity_top_k=3).query(query)
+                query_embedding = embeddings._get_text_embedding(query)
+                response = index.query(query_embedding, similarity_top_k=3)
                 st.write("### Query Response")
                 st.write(response)
             except Exception as e:
