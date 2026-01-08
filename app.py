@@ -5,8 +5,8 @@ from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_s
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.openai import OpenAI
 from llama_index.readers.imap import ImapReader
-from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai_like import OpenAILike
+from llama_index.embeddings.openai_like import OpenAILikeEmbedding
 import traceback
 import json
 
@@ -40,14 +40,17 @@ llm = OpenAILike(
     api_base=OPENAI_HOST,
     is_chat_model=True,
     is_function_calling_model=False,
-    metadata={"context_window": 4096, "num_output": 512}
+    context_window=8192,
 )
-embeddings = OpenAIEmbedding(
+embeddings = OpenAILikeEmbedding(
     model_name=OPENAI_EMBEDDING_MODEL,
     api_key=REGOLO_AI_API_KEY,
     api_base=OPENAI_HOST,
     model_type="embedding"
 )
+
+Settings.llm = llm
+Settings.embed_model = embeddings
 
 def fetch_emails_with_imap():
     reader = ImapReader(
@@ -67,8 +70,6 @@ if st.button("Index Emails"):
 
         index = VectorStoreIndex.from_documents(
             nodes,
-            llm=llm,
-            embed_model=embeddings,
             node_parser=node_parser
         )
         index.storage_context.persist(persist_dir=INDEX_STORAGE_DIR)
@@ -90,14 +91,10 @@ if os.path.exists(index_file_path):
     index = VectorStoreIndex.from_documents(
         nodes,
         storage_context=storage_context,
-        llm=llm,
-        embed_model=embeddings,
     )
 else:
     index = VectorStoreIndex.from_documents(
             [],
-            llm=llm,
-            embed_model=embeddings,
         )
     index.storage_context.persist(persist_dir=INDEX_STORAGE_DIR)
 
@@ -112,7 +109,7 @@ with st.form("query_form"):
             st.warning("No index found. Please index your emails first.")
         else:
             try:
-                response = index.as_query_engine(llm=llm,similarity_top_k=5, response_synthesizer=None).query(query)
+                response = index.as_query_engine(llm=llm,similarity_top_k=3).query(query)
                 st.write("### Query Response")
                 st.write(response)
             except Exception as e:

@@ -8,3 +8,4 @@ llama-index-llms-langchain
 llama-index-llms-openai
 llama-index-readers-imap
 llama-index-llms-openai-like
+llama-index-embeddings-openai-like
