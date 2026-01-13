@@ -56,6 +56,7 @@ embeddings = OpenAILikeEmbedding(
 Settings.llm = llm
 Settings.embed_model = embeddings
 
+
 def fetch_emails_with_imap():
     reader = ImapReader(
         username=USER_EMAIL,
@@ -64,6 +65,7 @@ def fetch_emails_with_imap():
     )
     return list(reader.load_data(search_criteria="ALL"))
 
+
 def save_vector_store(file_path, nodes):
     with open(file_path, "w") as f:
         json.dump(
@@ -71,6 +73,7 @@ def save_vector_store(file_path, nodes):
             f,
         )
     st.success(f"Vector store saved to {file_path}")
+
 
 def load_vector_store(file_path):
     vector_store = SimpleVectorStore()
@@ -92,9 +95,10 @@ def load_vector_store(file_path):
 
         vector_store.add(nodes)
 
-    st.sidebar.write(f"Email indexed: {len(data)}")
+        st.sidebar.write(f"Email indexed: {len(data)}")
 
     return vector_store, id_to_text
+
 
 if st.button("Index Emails"):
     try:
@@ -129,7 +133,7 @@ with st.form("query_form"):
 
     if submit_query:
         if not os.path.exists(INDEX_FILE):
-            st.warning("No index found. Please index your emails first.")
+            st.warning("No index found. Please index your emails first (or restart).")
         else:
             try:
                 query_embedding = embeddings._get_text_embedding(query)
@@ -140,10 +144,13 @@ with st.form("query_form"):
                 response = index.query(vs_query, similarity_top_k=3)
                 texts = [id_to_text[_id] for _id in response.ids]
                 context = "\n\n".join(
-                    f"[Email {i+1}]\n{text}"
+                    f"[Email {i + 1}]\n{text}"
                     for i, text in enumerate(texts)
                 )
+
                 st.write(f"### Email found: {len(texts)}")
+
+                st.write("### Query Response (takes a while, no streaming)")
 
                 prompt = f"""
                 You are an assistant who responds using EXCLUSIVELY the provided emails.
@@ -156,12 +163,12 @@ with st.form("query_form"):
 
                 INSTRUCTIONS:
 
-                Use only the information contained in the emails
-                If the emails do not contain the answer, state it clearly
-                Respond in a detailed and structured manner
+                Use only the information contained in the emails.
+                If the emails do not contain the answer, state it clearly.
+                Respond in a detailed and structured manner.
                 """
+                print(prompt)
                 response = llm.complete(prompt)
-                st.write("### Query Response")
                 st.write(response.text)
             except Exception as e:
                 st.error(f"An error occurred while querying: {e}")
